@@ -11,6 +11,7 @@ from collections import deque
 import skimage
 import ACTORCRITIC
 import Transition
+import copy
 from wandb import wandb
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
@@ -27,7 +28,7 @@ BETA = 0.5
 def train(states , actions, A, agent, old_agent, optimizer, G, entropies):
     pred,values = agent(states)
     old_pred, _ = old_agent(states)
-    print(pred == old_pred)
+    print((pred == old_pred).all())
     values = torch.squeeze(values)
     actions = actions*A.unsqueeze(1)
     pred_ratio = torch.exp(pred- old_pred)
@@ -90,7 +91,7 @@ if __name__ == "__main__":
     ##Actors in the simulation
     updater_agent = ACTORCRITIC.NeuralNetwork(action_space_size).to(device)
     actor_agent = ACTORCRITIC.NeuralNetwork(action_space_size).to(device)
-    actor_agent.load_state_dict(updater_agent.state_dict())
+
     ##Optimization stuff
     optimizer = optim.Adam(updater_agent.parameters(), lr = learning_rate)
     ##Transition class
@@ -154,9 +155,9 @@ if __name__ == "__main__":
         ##TRAIN
         V_ESTIMATES = torch.stack(transition.reward_estimate)
         V_ESTIMATES = V_ESTIMATES.float()
+        cache = copy.deepcopy(updater_agent)
         total_loss, entropy_loss, values_loss, policy_loss = train(states.to(device), actions.to(device),  (G-V_ESTIMATES).to(device), updater_agent, actor_agent, optimizer, G, torch.stack(transition.entropies).float())
         print(total_loss, entropy, values_loss, policy_loss)
-
         if games_played > 0:
             wandb.log({"BATCH REWARD": batch_reward/games_played, "TOTAL LOSS": total_loss, "ENTROPY LOSS":entropy_loss,"VALUES LOSS": values_loss, "POLICY LOSS":policy_loss})
         else:
@@ -165,6 +166,6 @@ if __name__ == "__main__":
         cumureward = 0
         batch_steps = 0
         transition.resetTransitions()
-        actor_agent.load_state_dict(updater_agent.state_dict())
+        actor_agent.load_state_dict(cache.state_dict())
         if total_time % 100000 == 0:
             saveModel(actor_agent, "AC_WEIGHTS.pth")
