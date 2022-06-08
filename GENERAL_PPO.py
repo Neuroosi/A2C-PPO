@@ -27,19 +27,20 @@ BETA = 0.5
 def train(states , actions, A, agent, old_agent, optimizer, G):
     pred,values = agent(states)
     old_pred, _ = old_agent(states)
-    print(pred==old_pred, values == _)
     values = torch.squeeze(values)
     actions = actions*A.unsqueeze(1)
     pred_ratio = torch.exp(pred- old_pred)
     clip = torch.clamp(pred_ratio, 1-EPSILON, 1+EPSILON)
     entropy = -torch.mean(torch.exp(old_pred)*old_pred)
-    loss = BETA*torch.mean((G-values)**2)-torch.mean(torch.min(pred_ratio*actions, clip*actions)) - ALPHA*entropy
+    values_loss = torch.mean((G-values)**2)
+    policy_loss = torch.mean(torch.min(pred_ratio*actions, clip*actions))
+    loss = BETA*values_loss-policy_loss - ALPHA*entropy
     optimizer.zero_grad()
     loss.backward()
     for param in agent.parameters():
         param.grad.data.clamp_(-1, 1)
     optimizer.step()
-    return loss.item()
+    return loss.item(), entropy, values_loss, policy_loss
 
 def getFrame(x):
     x = x[35:210,0:160]
@@ -151,13 +152,13 @@ if __name__ == "__main__":
         ##TRAIN
         V_ESTIMATES = torch.stack(transition.reward_estimate)
         V_ESTIMATES = V_ESTIMATES.float()
-        loss_policy = train(states.to(device), actions.to(device),  (G-V_ESTIMATES).to(device), updater_agent, actor_agent, optimizer, G)
-        print(loss_policy)
-        POLICY_LOSS.append(loss_policy)
+        total_loss, entropy, values_loss, policy_loss = train(states.to(device), actions.to(device),  (G-V_ESTIMATES).to(device), updater_agent, actor_agent, optimizer, G)
+        print(total_loss, entropy, values_loss, policy_loss)
+
         if games_played > 0:
-            wandb.log({"BATCH REWARD": batch_reward/games_played})
+            wandb.log({"BATCH REWARD": batch_reward/games_played, "TOTAL LOSS": total_loss, "ENTROPY ":entropy,"VALUES LOSS": values_loss, "POLICY LOSS":policy_loss})
         else:
-            wandb.log({"BATCH REWARD": gamereward})
+            wandb.log({"BATCH REWARD": batch_reward/games_played, "TOTAL LOSS": total_loss, "ENTROPY ":entropy,"VALUES LOSS": values_loss, "POLICY LOSS":policy_loss})
         games_played = 0
         cumureward = 0
         batch_steps = 0
