@@ -9,8 +9,7 @@ import gym
 import math
 from collections import deque
 import skimage
-import POLICY_NET
-import VALUE_ESTIMATOR
+import ACTORCRITIC
 import Transition
 from wandb import wandb
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -28,6 +27,7 @@ BETA = 0.5
 def train(states , actions, A, agent, old_agent, optimizer, G):
     pred,values = agent(states)
     old_pred, _ = old_agent(states)
+    print(pred==old_pred, values == _)
     values = torch.squeeze(values)
     actions = actions*A.unsqueeze(1)
     pred_ratio = torch.exp(pred- old_pred)
@@ -60,7 +60,7 @@ def loadModel(agent, filename):
     agent.load_state_dict(torch.load(filename))
     print("Model loaded!")
 
-def predict_POLICY(agent, state, transition, action_space_size):
+def predict(agent, state, transition, action_space_size):
     with torch.no_grad():
         state = np.expand_dims(state, axis=0)
         logprob, values = agent(torch.from_numpy(state).float())
@@ -86,19 +86,18 @@ if __name__ == "__main__":
     state = deque(maxlen = 4)
     wandb.init(project="PPO_PONG_"+game, entity="neuroori") 
     ##Actors in the simulation
-    updater_agent = POLICY_NET.NeuralNetwork(action_space_size).to(device)
-    actor_agent = POLICY_NET.NeuralNetwork(action_space_size).to(device)
+    updater_agent = ACTORCRITIC.NeuralNetwork(action_space_size).to(device)
+    actor_agent = ACTORCRITIC.NeuralNetwork(action_space_size).to(device)
     actor_agent.load_state_dict(updater_agent.state_dict())
     ##Optimization stuff
-    loss_VALUE = torch.nn.HuberLoss()
     optimizer = optim.Adam(updater_agent.parameters(), lr = learning_rate)
     ##Transition class
     transition = Transition.Transition(action_space_size)
 
     ans = input("Use a pretrained model y/n? ")
     if ans == "y":
-        loadModel(actor_agent, "POLICY_WEIGHTS.pth")
-        loadModel(updater_agent, "POLICY_WEIGHTS.pth")
+        loadModel(actor_agent, "AC_WEIGHTS.pth")
+        loadModel(updater_agent, "AC_WEIGHTS.pth")
     
     total_time = 0
     batch_steps = 0
@@ -113,7 +112,7 @@ if __name__ == "__main__":
         games_played = 0
         batch_reward = 0
         while batch_steps < 5000:
-            action, reward_estimate = predict_POLICY(actor_agent, makeState(state)/255, transition, action_space_size)
+            action, reward_estimate = predict(actor_agent, makeState(state)/255, transition, action_space_size)
             #if action == 0:
             #    observation, reward, done, info = env.step(2)##UP
             #else:
@@ -165,4 +164,4 @@ if __name__ == "__main__":
         transition.resetTransitions()
         actor_agent.load_state_dict(updater_agent.state_dict())
         if total_time % 100000 == 0:
-            saveModel(actor_agent, "POLICY_WEIGHTS.pth")
+            saveModel(actor_agent, "AC_WEIGHTS.pth")
