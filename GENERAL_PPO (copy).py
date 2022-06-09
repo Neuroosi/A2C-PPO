@@ -23,25 +23,44 @@ BATCH_SIZE = 5
 INPUTSIZE = (84,84)
 EPSILON = 0.2
 ALPHA = 0.01
-BETA = 0.5
-
-def train(states , actions, A, agent, old_agent, optimizer, G, entropies):
-    pred,values = agent(states)
-    old_pred, _ = old_agent(states)
-    print((pred == old_pred).all())
-    values = torch.squeeze(values)
-    actions = actions*A.unsqueeze(1)
-    pred_ratio = torch.exp(pred- old_pred)
-    clip = torch.clamp(pred_ratio, 1-EPSILON, 1+EPSILON)
-    entropy_loss = -torch.mean(entropies)
-    values_loss = torch.mean((G-values)**2)
-    policy_loss = -torch.mean(torch.min(pred_ratio*actions, clip*actions))
-    loss = BETA*values_loss+policy_loss + ALPHA*entropy_loss
-    optimizer.zero_grad()
-    loss.backward()
-    for param in agent.parameters():
-        param.grad.data.clamp_(-1, 1)
-    optimizer.step()
+BETA = 1
+MAX_ITERS = 5
+KL_LIMES = 0.01
+def train(states , actions, A, agent,  optimizer, G, entropies, old_pred):
+    indexs = np.arange(len(states))
+    for iter in range(MAX_ITERS):
+        estimate_kl_div = 0
+        lower_M = 0
+        upper_M = 1000
+        np.random.shuffle(indexs)
+        for step in range(5):
+            index = indexs[lower_M:upper_M]
+            state = states[index]
+            G_ = G[index]
+            A_ = A[index]
+            actions_= actions[index]
+            pred,values = agent(state)
+            old_pred_ = old_pred[index]
+            values = torch.squeeze(values)
+            actions_ = actions_*A_.unsqueeze(1)
+            pred_ratio = torch.exp(pred- old_pred_)
+            clip = torch.clamp(pred_ratio, 1-EPSILON, 1+EPSILON)
+            entropy_loss = -torch.mean(entropies)
+            values_loss = torch.mean((G_-values)**2)
+            policy_loss = -torch.mean(torch.min(pred_ratio*actions_, clip*actions_))
+            loss = BETA*values_loss+policy_loss + ALPHA*entropy_loss
+            optimizer.zero_grad()
+            loss.backward()
+            for param in agent.parameters():
+                param.grad.data.clamp_(-1, 1)
+            optimizer.step()
+            lower_M += 1000
+            upper_M += 1000
+            estimate_kl_div += torch.mean(torch.exp(pred)*(pred-old_pred_))
+        #estimate_kl_div /= 20
+        if estimate_kl_div > KL_LIMES:
+            print("breaking at iter ",  iter)
+            break
     return loss.item(), entropy_loss, values_loss, policy_loss
 
 def getFrame(x):
@@ -78,7 +97,7 @@ def predict_VALUE(agent, state):
         return agent(state)
 
 if __name__ == "__main__":
-    game = "Breakout-v4"
+    game = "BreakoutDeterministic-v4"
     env = gym.make(game)
     action_space_size = env.action_space.n
     ##Book keeping
@@ -87,18 +106,16 @@ if __name__ == "__main__":
     state = deque(maxlen = 4)
     wandb.init(project="PPO_PONG_"+game, entity="neuroori") 
     ##Actors in the simulation
-    updater_agent = ACTORCRITIC.NeuralNetwork(action_space_size).to(device)
     actor_agent = ACTORCRITIC.NeuralNetwork(action_space_size).to(device)
-    actor_agent.load_state_dict(updater_agent.state_dict())
+
     ##Optimization stuff
-    optimizer = optim.Adam(updater_agent.parameters(), lr = learning_rate)
+    optimizer = optim.Adam(actor_agent.parameters(), lr = learning_rate)
     ##Transition class
     transition = Transition.Transition(action_space_size)
 
     ans = input("Use a pretrained model y/n? ")
     if ans == "y":
         loadModel(actor_agent, "AC_WEIGHTS.pth")
-        loadModel(updater_agent, "AC_WEIGHTS.pth")
     
     total_time = 0
     batch_steps = 0
@@ -113,14 +130,14 @@ if __name__ == "__main__":
         games_played = 0
         batch_reward = 0
         while batch_steps < 5000:
-            action, reward_estimate, distribution = predict(actor_agent, makeState(state)/255,  action_space_size)
+            action, reward_estimate, distribution = predict(actor_agent, makeState(state)/255, action_space_size)
             #if action == 0:
             #    observation, reward, done, info = env.step(2)##UP
             #else:
             #    observation, reward, done, info = env.step(3)##DOWN
             observation, reward, done, info = env.step(action)
             entropy = -torch.sum(distribution*torch.exp(distribution))
-            transition.addTransition(makeState(state), reward, action, reward_estimate, entropy)
+            transition.addTransition(makeState(state), reward, action, reward_estimate, entropy, distribution)
             state.append(getFrame(observation))
             total_time += 1
             batch_steps += 1
@@ -153,8 +170,8 @@ if __name__ == "__main__":
         ##TRAIN
         V_ESTIMATES = torch.stack(transition.reward_estimate)
         V_ESTIMATES = V_ESTIMATES.float()
-        cache = copy.deepcopy(updater_agent)
-        total_loss, entropy_loss, values_loss, policy_loss = train(states.to(device), actions.to(device),  (G-V_ESTIMATES).to(device), updater_agent, actor_agent, optimizer, G, torch.stack(transition.entropies).float())
+        old_probs = torch.stack(transition.old_probs).float()
+        total_loss, entropy_loss, values_loss, policy_loss = train(states.to(device), actions.to(device),  (G-V_ESTIMATES).to(device),  actor_agent, optimizer, G, torch.stack(transition.entropies).float(), old_probs)
         print(total_loss, entropy, values_loss, policy_loss)
         if games_played > 0:
             wandb.log({"BATCH REWARD": batch_reward/games_played, "TOTAL LOSS": total_loss, "ENTROPY LOSS":entropy_loss,"VALUES LOSS": values_loss, "POLICY LOSS":policy_loss})
@@ -164,6 +181,5 @@ if __name__ == "__main__":
         cumureward = 0
         batch_steps = 0
         transition.resetTransitions()
-        actor_agent.load_state_dict(cache.state_dict())
         if total_time % 100000 == 0:
             saveModel(actor_agent, "AC_WEIGHTS.pth")
