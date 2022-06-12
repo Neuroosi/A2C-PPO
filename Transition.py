@@ -6,7 +6,7 @@ class Transition:
         self.states = []
         self.rewards = []
         self.actions = []
-        self.probs = []
+        self.old_probs = []
         self.reward_estimate = []
 
     def addTransition(self, state, reward, action, reward_estimate):
@@ -17,11 +17,12 @@ class Transition:
         self.actions.append(cache)
         self.reward_estimate.append(reward_estimate)
 
+
     def resetTransitions(self):
         self.states = []
         self.rewards = []
         self.actions = []
-        self.probs = []
+        self.old_probs = []
         self.reward_estimate = []
         
     def discounted_reward(self, GAMMA):
