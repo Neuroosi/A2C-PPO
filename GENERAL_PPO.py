@@ -16,45 +16,66 @@ from wandb import wandb
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
 ##Hyperparameters
-learning_rate = 0.0003
+learning_rate = 0.00025
 GAMMA = 0.99
 EPISODES = 5000
 BATCH_SIZE = 5
 INPUTSIZE = (84,84)
 EPSILON = 0.2
-ALPHA = 0.01
+ALPHA = 0.001
 BETA = 0.5
-
+MAX_ITERS = 4
 def train(states , actions, A, agent, old_agent, optimizer, G):
     print(optimizer.param_groups[0]['lr'])
-    pred,values = agent(states)
-    new_dist = torch.distributions.Categorical(pred)
-    entropies = new_dist.entropy()
-    old_pred, old_values = old_agent(states)
-    print((pred == old_pred).all())
-    values = torch.squeeze(values)
-    actions = actions*A.unsqueeze(1)
+    indexs = np.arange(len(states))
+    total_loss = 0
+    total_entropy_loss = 0
+    total_policy_loss = 0
+    total_values_loss = 0
+    for iter in range(MAX_ITERS):
+        lower_M = 0
+        upper_M = 500
+        np.random.shuffle(indexs)
+        for m in range(32):
+            index = indexs[lower_M:upper_M]
+            state = states[index]
+            G_ = G[index]
+            A_ = A[index]
+            actions_ = actions[index]
+            pred,values = agent(state)
+            new_dist = torch.distributions.Categorical(pred)
+            entropies = new_dist.entropy()
+            old_pred, old_values = old_agent(state)
+            values = torch.squeeze(values)
+            actions_ = actions_*A_.unsqueeze(1)
     
-    pred_ratio = torch.exp(pred- old_pred)
-    clip = torch.clamp(pred_ratio, 1-EPSILON, 1+EPSILON)
-    policy_loss = -torch.mean(torch.min(pred_ratio*actions, clip*actions))
+            pred_ratio = torch.exp(pred- old_pred)
+            clip = torch.clamp(pred_ratio, 1-EPSILON, 1+EPSILON)
+            policy_loss = -torch.mean(torch.min(pred_ratio*actions_, clip*actions_))
 
-    clip = old_values + (values - old_values).clamp(-EPSILON, EPSILON)
-    values_loss = (G-values)**2
-    clip_loss = (clip-values)**2
-    values_loss = torch.max(values_loss, clip_loss)
-    values_loss = torch.mean(values_loss)
+            clip = old_values + (values - old_values).clamp(-EPSILON, EPSILON)
+            values_loss = (G_-values)**2
+            clip_loss = (clip-values)**2
+            values_loss = torch.max(values_loss, clip_loss)
+            values_loss = torch.mean(values_loss)
 
-    entropy_loss = -torch.mean(entropies)
+            entropy_loss = -torch.mean(entropies)
 
-    loss = BETA*values_loss+policy_loss + ALPHA*entropy_loss
+            loss = BETA*values_loss+policy_loss + ALPHA*entropy_loss
 
-    optimizer.zero_grad()
-    loss.backward()
-    for param in agent.parameters():
-        param.grad.data.clamp_(-1, 1)
-    optimizer.step()
-    return loss.item(), entropy_loss, values_loss, policy_loss
+            optimizer.zero_grad()
+            loss.backward()
+            for param in agent.parameters():
+                param.grad.data.clamp_(-1, 1)
+            optimizer.step()
+
+            lower_M += 500
+            upper_M += 500
+            total_loss += loss.item()
+            total_entropy_loss += entropy_loss
+            total_policy_loss += policy_loss
+            total_values_loss += values_loss
+    return total_loss/(4*32.0), total_entropy_loss/(4*32.0), total_values_loss/(4*32.0), total_policy_loss/(4*32.0)
 
 def getFrame(x):
     x = x[35:210,0:160]
@@ -122,7 +143,7 @@ if __name__ == "__main__":
         gamereward = 0
         games_played = 0
         batch_reward = 0
-        while batch_steps < 4000:
+        while batch_steps < 4000*4:
             action, reward_estimate, distribution = predict(actor_agent, makeState(state)/255,  action_space_size)
             #if action == 0:
             #    observation, reward, done, info = env.step(2)##UP
