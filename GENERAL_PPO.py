@@ -25,6 +25,7 @@ EPSILON = 0.2
 ALPHA = 0.0001
 BETA = 0.5
 MAX_ITERS = 4
+MAX_UPDATES = 10000
 def train(states , actions, A, agent, old_agent, optimizer, G):
     print(optimizer.param_groups[0]['lr'])
     indexs = np.arange(len(states))
@@ -106,6 +107,13 @@ def predict(agent, state, action_space_size):
         prob = np.squeeze(prob)
         return np.random.choice(action_space_size, p = prob), values, logprob
 
+def update_linear_schedule(optimizer, epoch, total_num_epochs, initial_lr):
+    """Decreases the learning rate linearly"""
+    lr = initial_lr - (initial_lr * (epoch / float(total_num_epochs)))
+    print("LEARNING RATE", lr)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
 
 if __name__ == "__main__":
     game = "BreakoutDeterministic-v4"
@@ -134,57 +142,60 @@ if __name__ == "__main__":
     total_time = 0
     batch_steps = 0
 
-    for episode in range(1,EPISODES+500000000000):
-        observation = env.reset()
-        state.append(getFrame(observation))
-        state.append(getFrame(observation))
-        state.append(getFrame(observation))
-        state.append(getFrame(observation))
-        gamereward = 0
-        games_played = 0
-        while True:
-            action, reward_estimate, distribution = predict(actor_agent, makeState(state)/255,  action_space_size)
+
+    observation = env.reset()
+    state.append(getFrame(observation))
+    state.append(getFrame(observation))
+    state.append(getFrame(observation))
+    state.append(getFrame(observation))
+    gamereward = 0
+    games_played = 0
+    update = 0
+    while update < MAX_UPDATES:
+        action, reward_estimate, distribution = predict(actor_agent, makeState(state)/255,  action_space_size)
             #if action == 0:
             #    observation, reward, done, info = env.step(2)##UP
             #else:
             #    observation, reward, done, info = env.step(3)##DOWN
-            observation, reward, done, info = env.step(action)
-            transition.addTransition(makeState(state), reward, action, reward_estimate)
+        observation, reward, done, info = env.step(action)
+        transition.addTransition(makeState(state), reward, action, reward_estimate)
+        state.append(getFrame(observation))
+        total_time += 1
+        batch_steps += 1
+        gamereward += reward
+        env.render()
+        if done:
+            print("Running reward: ", gamereward)
+            wandb.log({"RUNNING REWARD" :  gamereward})
+            gamereward = 0
+            observation = env.reset()
             state.append(getFrame(observation))
-            total_time += 1
-            batch_steps += 1
-            gamereward += reward
-            env.render()
-            if done:
-                print("Running reward: ", gamereward)
-                wandb.log({"RUNNING REWARD" :  gamereward})
-                gamereward = 0
-                observation = env.reset()
-                state.append(getFrame(observation))
-                state.append(getFrame(observation))
-                state.append(getFrame(observation))
-                state.append(getFrame(observation))
-                games_played += 1
-            if batch_steps % 1024 == 0:
-                print("Gamesplayed: ", games_played, " Steps: ", total_time)
+            state.append(getFrame(observation))
+            state.append(getFrame(observation))
+            state.append(getFrame(observation))
+            games_played += 1
+        if batch_steps % 1024 == 0:
+            print("POLICY/VALUES UPDATED", update ,"Gamesplayed: ", games_played, " Steps: ", total_time)
                  ##Put data to a tensor form
-                G = transition.discounted_reward(GAMMA)
-                G = torch.from_numpy(G).to(device).float()
-                states = [torch.from_numpy(np.array(state)/255) for state in transition.states]
-                states = torch.stack(states)
-                states = states.float()
-                actions = [torch.from_numpy(np.array(action)) for action in transition.actions]
-                actions = torch.stack(actions)
-                actions = actions.float()
+            G = transition.discounted_reward(GAMMA)
+            G = torch.from_numpy(G).to(device).float()
+            states = [torch.from_numpy(np.array(state)/255) for state in transition.states]
+            states = torch.stack(states)
+            states = states.float()
+            actions = [torch.from_numpy(np.array(action)) for action in transition.actions]
+            actions = torch.stack(actions)
+            actions = actions.float()
                 ##TRAIN
-                V_ESTIMATES = torch.stack(transition.reward_estimate)
-                V_ESTIMATES = V_ESTIMATES.float()
-                cache = copy.deepcopy(updater_agent)
-                total_loss, entropy_loss, values_loss, policy_loss = train(states.to(device), actions.to(device),  (G-V_ESTIMATES).to(device), updater_agent, actor_agent, optimizer, G)
-                print(total_loss,  values_loss, policy_loss)
-                wandb.log({"TOTAL LOSS": total_loss, "ENTROPY LOSS":entropy_loss,"VALUES LOSS": values_loss, "POLICY LOSS":policy_loss})
-                batch_steps = 0
-                transition.resetTransitions()
-                actor_agent.load_state_dict(cache.state_dict())
-                if total_time % 100000 == 0:
-                    saveModel(actor_agent, "AC_WEIGHTS.pth")
+            V_ESTIMATES = torch.stack(transition.reward_estimate)
+            V_ESTIMATES = V_ESTIMATES.float()
+            cache = copy.deepcopy(updater_agent)
+            total_loss, entropy_loss, values_loss, policy_loss = train(states.to(device), actions.to(device),  (G-V_ESTIMATES).to(device), updater_agent, actor_agent, optimizer, G)
+            print(total_loss,  values_loss, policy_loss)
+            wandb.log({"TOTAL LOSS": total_loss, "ENTROPY LOSS":entropy_loss,"VALUES LOSS": values_loss, "POLICY LOSS":policy_loss})
+            batch_steps = 0
+            transition.resetTransitions()
+            actor_agent.load_state_dict(cache.state_dict())
+            update +=1
+            update_linear_schedule(optimizer, update, MAX_UPDATES, learning_rate)
+            if total_time % 100000 == 0:
+                saveModel(actor_agent, "AC_WEIGHTS.pth")
