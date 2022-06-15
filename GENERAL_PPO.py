@@ -11,7 +11,6 @@ from collections import deque
 import skimage
 import ACTORCRITIC
 import Transition
-import copy
 from wandb import wandb
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
@@ -49,8 +48,9 @@ def train(states , actions, A, agent, optimizer, G, old_probs, old_valuess):
             old_pred = old_probs[index]
             old_values = old_valuess[index]
             values = torch.squeeze(values)
+            old_pred = torch.squeeze(old_pred)
             actions_ = actions_*A_.unsqueeze(1)
-    
+            
             pred_ratio = torch.exp(pred- old_pred)
             clip = torch.clamp(pred_ratio, 1-EPSILON, 1+EPSILON)
             policy_loss = -torch.mean(torch.min(pred_ratio*actions_, clip*actions_))
