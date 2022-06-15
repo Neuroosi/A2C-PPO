@@ -154,7 +154,7 @@ if __name__ == "__main__":
             #else:
             #    observation, reward, done, info = env.step(3)##DOWN
         observation, reward, done, info = env.step(action)
-        transition.addTransition(makeState(state), reward, action, reward_estimate, distribution)
+        transition.addTransition(makeState(state), max(min(reward, 1), -1), action, reward_estimate, distribution)
         state.append(getFrame(observation))
         total_time += 1
         batch_steps += 1
