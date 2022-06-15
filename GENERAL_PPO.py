@@ -25,7 +25,7 @@ EPSILON = 0.2
 ALPHA = 0.0001
 BETA = 0.5
 MAX_ITERS = 4
-MAX_UPDATES = 10000
+MAX_UPDATES = 15000
 def train(states , actions, A, agent, old_agent, optimizer, G):
     print(optimizer.param_groups[0]['lr'])
     indexs = np.arange(len(states))
@@ -37,14 +37,14 @@ def train(states , actions, A, agent, old_agent, optimizer, G):
         lower_M = 0
         upper_M = 64
         np.random.shuffle(indexs)
-        for m in range(16):
+        for m in range(32):
             index = indexs[lower_M:upper_M]
             state = states[index]
             G_ = G[index]
             A_ = A[index]
             actions_ = actions[index]
             pred,values = agent(state)
-            new_dist = torch.distributions.Categorical(pred)
+            new_dist = torch.distributions.Categorical(torch.exp(pred))
             entropies = new_dist.entropy()
             old_pred, old_values = old_agent(state)
             values = torch.squeeze(values)
@@ -76,7 +76,7 @@ def train(states , actions, A, agent, old_agent, optimizer, G):
             total_entropy_loss += entropy_loss
             total_policy_loss += policy_loss
             total_values_loss += values_loss
-    return total_loss/(64.0), total_entropy_loss/(64.0), total_values_loss/(64.0), total_policy_loss/(64.0)
+    return total_loss/(64.0*2), total_entropy_loss/(64.0*2), total_values_loss/(64.0*2), total_policy_loss/(64.0*2)
 
 def getFrame(x):
     x = x[35:210,0:160]
@@ -130,7 +130,6 @@ if __name__ == "__main__":
     actor_agent.load_state_dict(updater_agent.state_dict())
     ##Optimization stuff
     optimizer = optim.Adam(updater_agent.parameters(), lr = learning_rate)
-    scheluder = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode = "min", factor = 0.1, patience = 10, threshold = 0.0001, threshold_mode = "abs", min_lr = 0, verbose = True)
     ##Transition class
     transition = Transition.Transition(action_space_size)
 
@@ -174,7 +173,7 @@ if __name__ == "__main__":
             state.append(getFrame(observation))
             state.append(getFrame(observation))
             games_played += 1
-        if batch_steps % 1024 == 0:
+        if batch_steps % 2048 == 0:
             print("POLICY/VALUES UPDATED", update ,"Gamesplayed: ", games_played, " Steps: ", total_time)
                  ##Put data to a tensor form
             G = transition.discounted_reward(GAMMA)
