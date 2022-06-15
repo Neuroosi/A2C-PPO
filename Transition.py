@@ -9,14 +9,14 @@ class Transition:
         self.old_probs = []
         self.reward_estimate = []
 
-    def addTransition(self, state, reward, action, reward_estimate):
+    def addTransition(self, state, reward, action, reward_estimate, probs):
         self.states.append(state)
         self.rewards.append(reward)
         cache = np.zeros(self.actionSpaceSize)
         cache[action] = 1
         self.actions.append(cache)
         self.reward_estimate.append(reward_estimate)
-
+        self.old_probs.append(probs)
 
     def resetTransitions(self):
         self.states = []

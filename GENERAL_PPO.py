@@ -1,5 +1,5 @@
 import torch
-from torch import nn
+from torch import distributions, nn
 from torch._C import device
 from torch import optim
 import random
@@ -22,12 +22,12 @@ EPISODES = 5000
 BATCH_SIZE = 5
 INPUTSIZE = (84,84)
 EPSILON = 0.2
-ALPHA = 0.0001
+ALPHA = 0.01
 BETA = 0.5
 MAX_ITERS = 4
 MAX_UPDATES = 15000
-def train(states , actions, A, agent, old_agent, optimizer, G):
-    print(optimizer.param_groups[0]['lr'])
+def train(states , actions, A, agent, optimizer, G, old_probs, old_valuess):
+    print("LEARNING_RATE ",optimizer.param_groups[0]['lr'])
     indexs = np.arange(len(states))
     total_loss = 0
     total_entropy_loss = 0
@@ -46,7 +46,8 @@ def train(states , actions, A, agent, old_agent, optimizer, G):
             pred,values = agent(state)
             new_dist = torch.distributions.Categorical(torch.exp(pred))
             entropies = new_dist.entropy()
-            old_pred, old_values = old_agent(state)
+            old_pred = old_probs[index]
+            old_values = old_valuess[index]
             values = torch.squeeze(values)
             actions_ = actions_*A_.unsqueeze(1)
     
@@ -110,7 +111,6 @@ def predict(agent, state, action_space_size):
 def update_linear_schedule(optimizer, epoch, total_num_epochs, initial_lr):
     """Decreases the learning rate linearly"""
     lr = initial_lr - (initial_lr * (epoch / float(total_num_epochs)))
-    print("LEARNING RATE", lr)
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
@@ -125,18 +125,15 @@ if __name__ == "__main__":
     state = deque(maxlen = 4)
     wandb.init(project="PPO_PONG_"+game, entity="neuroori") 
     ##Actors in the simulation
-    updater_agent = ACTORCRITIC.NeuralNetwork(action_space_size).to(device)
     actor_agent = ACTORCRITIC.NeuralNetwork(action_space_size).to(device)
-    actor_agent.load_state_dict(updater_agent.state_dict())
     ##Optimization stuff
-    optimizer = optim.Adam(updater_agent.parameters(), lr = learning_rate)
+    optimizer = optim.Adam(actor_agent.parameters(), lr = learning_rate)
     ##Transition class
     transition = Transition.Transition(action_space_size)
 
     ans = input("Use a pretrained model y/n? ")
     if ans == "y":
         loadModel(actor_agent, "AC_WEIGHTS.pth")
-        loadModel(updater_agent, "AC_WEIGHTS.pth")
     
     total_time = 0
     batch_steps = 0
@@ -157,7 +154,7 @@ if __name__ == "__main__":
             #else:
             #    observation, reward, done, info = env.step(3)##DOWN
         observation, reward, done, info = env.step(action)
-        transition.addTransition(makeState(state), reward, action, reward_estimate)
+        transition.addTransition(makeState(state), reward, action, reward_estimate, distribution)
         state.append(getFrame(observation))
         total_time += 1
         batch_steps += 1
@@ -187,13 +184,13 @@ if __name__ == "__main__":
                 ##TRAIN
             V_ESTIMATES = torch.stack(transition.reward_estimate)
             V_ESTIMATES = V_ESTIMATES.float()
-            cache = copy.deepcopy(updater_agent)
-            total_loss, entropy_loss, values_loss, policy_loss = train(states.to(device), actions.to(device),  (G-V_ESTIMATES).to(device), updater_agent, actor_agent, optimizer, G)
+            old_probs = torch.stack(transition.old_probs).float()
+            old_rewards = torch.stack(transition.reward_estimate).float()
+            total_loss, entropy_loss, values_loss, policy_loss = train(states.to(device), actions.to(device),  (G-V_ESTIMATES).to(device), actor_agent, optimizer, G, old_probs, old_rewards)
             print(total_loss,  values_loss, policy_loss)
             wandb.log({"TOTAL LOSS": total_loss, "ENTROPY LOSS":entropy_loss,"VALUES LOSS": values_loss, "POLICY LOSS":policy_loss})
             batch_steps = 0
             transition.resetTransitions()
-            actor_agent.load_state_dict(cache.state_dict())
             update +=1
             update_linear_schedule(optimizer, update, MAX_UPDATES, learning_rate)
             if total_time % 100000 == 0:
