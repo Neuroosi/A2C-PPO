@@ -15,7 +15,7 @@ from wandb import wandb
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
 ##Hyperparameters
-learning_rate = 0.0003
+learning_rate = 0.0001
 GAMMA = 0.99
 EPISODES = 5000
 BATCH_SIZE = 5
@@ -25,6 +25,7 @@ ALPHA = 0.01
 BETA = 0.5
 MAX_ITERS = 4
 MAX_UPDATES = 15000
+KL_LIMES = 0.015
 def train(states , actions, A, agent, optimizer, G, old_probs, old_valuess):
     print("LEARNING_RATE ",optimizer.param_groups[0]['lr'])
     indexs = np.arange(len(states))
@@ -32,6 +33,8 @@ def train(states , actions, A, agent, optimizer, G, old_probs, old_valuess):
     total_entropy_loss = 0
     total_policy_loss = 0
     total_values_loss = 0
+    update_steps = 0
+    total_kl_approx_mean = 0
     for iter in range(MAX_ITERS):
         lower_M = 0
         upper_M = 64
@@ -77,7 +80,12 @@ def train(states , actions, A, agent, optimizer, G, old_probs, old_valuess):
             total_entropy_loss += entropy_loss
             total_policy_loss += policy_loss
             total_values_loss += values_loss
-    return total_loss/(64.0*2), total_entropy_loss/(64.0*2), total_values_loss/(64.0*2), total_policy_loss/(64.0*2)
+            kl_approx = 0.5*(pred-old_pred)**2
+            total_kl_approx_mean += kl_approx
+            update_steps += 1
+            if kl_approx > KL_LIMES:
+                break
+    return total_loss/(update_steps), total_entropy_loss/(update_steps), total_values_loss/(update_steps), total_policy_loss/(update_steps), total_kl_approx_mean / update_steps
 
 def getFrame(x):
     x = x[35:210,0:160]
@@ -186,9 +194,9 @@ if __name__ == "__main__":
             V_ESTIMATES = V_ESTIMATES.float()
             old_probs = torch.stack(transition.old_probs).float()
             old_rewards = torch.stack(transition.reward_estimate).float()
-            total_loss, entropy_loss, values_loss, policy_loss = train(states.to(device), actions.to(device),  (G-V_ESTIMATES).to(device), actor_agent, optimizer, G, old_probs, old_rewards)
-            print(total_loss,  values_loss, policy_loss)
-            wandb.log({"TOTAL LOSS": total_loss, "ENTROPY LOSS":entropy_loss,"VALUES LOSS": values_loss, "POLICY LOSS":policy_loss})
+            total_loss, entropy_loss, values_loss, policy_loss, kl_approx = train(states.to(device), actions.to(device),  (G-V_ESTIMATES).to(device), actor_agent, optimizer, G, old_probs, old_rewards)
+            print(total_loss,  values_loss, policy_loss, entropy_loss, kl_approx)
+            wandb.log({"TOTAL LOSS": total_loss, "ENTROPY LOSS":entropy_loss,"VALUES LOSS": values_loss, "POLICY LOSS":policy_loss, "KL_APPROX MEAN": kl_approx})
             batch_steps = 0
             transition.resetTransitions()
             update +=1
