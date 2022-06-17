@@ -7,7 +7,8 @@ python3 PPO_TRAIN.PY
 ```
 
 #TESTING
-Test with pretrained weights ```
+Test with pretrained weights
+```
 python3 PPO_TEST.PY
 ```
 
