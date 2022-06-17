@@ -6,7 +6,7 @@ General ppo implementation.
 python3 PPO_TRAIN.PY
 ```
 
-#TESTING
+# TESTING  
 Test with pretrained weights
 ```
 python3 PPO_TEST.PY
