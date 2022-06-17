@@ -125,13 +125,10 @@ def update_linear_schedule(optimizer, epoch, total_num_epochs, initial_lr):
         param_group['lr'] = lr
 
 
-if __name__ == "__main__":
+def train():
     game = "BreakoutDeterministic-v4"
     env = gym.make(game)
     action_space_size = env.action_space.n
-    ##Book keeping
-    VALUE_ESTIMATOR_LOSS = []
-    POLICY_LOSS = []
     state = deque(maxlen = 4)
     wandb.init(project="PPO_PONG_"+game, entity="neuroori") 
     ##Actors in the simulation
@@ -143,7 +140,7 @@ if __name__ == "__main__":
 
     ans = input("Use a pretrained model y/n? ")
     if ans == "y":
-        loadModel(actor_agent, "AC_WEIGHTS.pth")
+        loadModel(actor_agent, game + "_PPO_WEIGHTS.pth")
     
     total_time = 0
     batch_steps = 0
@@ -159,10 +156,6 @@ if __name__ == "__main__":
     update = 0
     while update < MAX_UPDATES:
         action, reward_estimate, distribution = predict(actor_agent, makeState(state)/255,  action_space_size)
-            #if action == 0:
-            #    observation, reward, done, info = env.step(2)##UP
-            #else:
-            #    observation, reward, done, info = env.step(3)##DOWN
         observation, reward, done, info = env.step(action)
         transition.addTransition(makeState(state), max(min(reward, 1), -1), action, reward_estimate, distribution)
         state.append(getFrame(observation))
@@ -204,4 +197,7 @@ if __name__ == "__main__":
             update +=1
             update_linear_schedule(optimizer, update, MAX_UPDATES, learning_rate)
             if update % 500 == 0:
-                saveModel(actor_agent, "AC_WEIGHTS.pth")
+                saveModel(actor_agent, game + "_PPO_WEIGHTS.pth")
+
+if __name__ == "__main__":
+    train()
