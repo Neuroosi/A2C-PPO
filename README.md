@@ -2,10 +2,14 @@
 General ppo implementation. 
 
 # Training
-´python3 PPO_TRAIN.py´
+```
+python3 PPO_TRAIN.PY
+```
 
 #TESTING
-Test with pretrained weights ´python3 PPO_TEST.py´
+Test with pretrained weights ```
+python3 PPO_TEST.PY
+```
 
 # Results
 
