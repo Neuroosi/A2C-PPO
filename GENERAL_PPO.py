@@ -81,9 +81,11 @@ def train(states , actions, A, agent, optimizer, G, old_probs, old_valuess):
             total_policy_loss += policy_loss
             total_values_loss += values_loss
             kl_approx = 0.5*(pred-old_pred)**2
+            kl_approx = torch.mean(kl_approx)
             total_kl_approx_mean += kl_approx
             update_steps += 1
             if kl_approx > KL_LIMES:
+                print("BREAKING AT STEP", update_steps)
                 break
     return total_loss/(update_steps), total_entropy_loss/(update_steps), total_values_loss/(update_steps), total_policy_loss/(update_steps), total_kl_approx_mean / update_steps
 
@@ -201,5 +203,5 @@ if __name__ == "__main__":
             transition.resetTransitions()
             update +=1
             update_linear_schedule(optimizer, update, MAX_UPDATES, learning_rate)
-            if total_time % 100000 == 0:
+            if update % 500 == 0:
                 saveModel(actor_agent, "AC_WEIGHTS.pth")
