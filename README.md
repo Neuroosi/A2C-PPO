@@ -1,5 +1,5 @@
 # Pong-VPG
-General ppo implementation. 
+General ppo implementation. https://arxiv.org/pdf/1707.06347.pdf
 
 # Training
 ```
